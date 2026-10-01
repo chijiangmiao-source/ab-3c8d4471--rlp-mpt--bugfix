@@ -142,6 +142,8 @@ def main() -> int:
                  ["tests.test_keccak"])
     run_unittest("代码测试/规范 RLP 编解码", ["tests.test_rlp"])
     run_unittest("代码测试/Hex-Prefix 路径编码", ["tests.test_hp"])
+    run_unittest("代码测试/标准短内嵌节点判定为已授权（两层证据）",
+                 ["tests.test_trie_proof.ShortEmbeddedNode"])
     run_unittest("代码测试/有效证明判定为已授权（含分支值槽、逐层轨迹）",
                  ["tests.test_trie_proof.EmptyAndSimpleTrie",
                   "tests.test_trie_proof.BranchValueSlot",
@@ -151,6 +153,7 @@ def main() -> int:
     run_unittest("页面构建检查/静态页面一致性", PAGE_CHECK)
     smoke_health_and_page()
     verify_via_api("enabled", "AUTHORIZED")
+    verify_via_api("short_embedded_leaf", "AUTHORIZED")
     verify_via_api("disabled", "UNAUTHORIZED")
 
     # ---- 场景二：篡改子节点引用 ------------------------------------------

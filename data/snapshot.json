@@ -1,6 +1,6 @@
 {
   "trie_root": "0x8335006febb76a8e1583781a86fa0bad964aefd397b6a2ec6b79a54bba0fc96c",
-  "description": "离线指令授权快照（MPT 承诺：叶值 01 表示启用）",
+  "description": "离线指令授权快照（MPT 承诺：叶值 01 表示启用；支持标准短内嵌节点）",
   "fixtures": [
     {
       "name": "enabled_41727469",
@@ -87,6 +87,15 @@
         "0xf8518080a08acac96434131809830045758351708d883128852110143ca5d9c1884a7cb3f9a0c47f85c10f97ebe5d0aa3f76f4991a688e650b5d4e1c2c9cf8df5e21d8e0af8280808080808080808080808080",
         "0xe215a009b3bc3a80cfa35207d6be9f470259b06b3cac9ba36a1b7152116155815577ec",
         "0xf280d08e205541445f4c4f4f505f3030303101808080d18f2050504c595f44524f505f30303034018080808080808080808080"
+      ],
+      "expect": "AUTHORIZED"
+    },
+    {
+      "name": "short_embedded_leaf",
+      "command_id": "0x12",
+      "root_hash": "0x7d2892cd2bf1dd0d049829aac77730d06a18831f15352c76bff2e13c833e965d",
+      "proof": [
+        "0xd48083c23201808080808080808080808080808080"
       ],
       "expect": "AUTHORIZED"
     },

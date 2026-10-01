@@ -5,6 +5,9 @@ Produces data/snapshot.json containing:
     authorization flags (01 = enabled, other values exist but are not
     enabled);
   * valid root-to-leaf proofs for sample commands;
+  * a standard short-embedded-node proof: a branch root whose nibble slot
+    references the leaf by the leaf's full RLP byte string (length < 32),
+    so the proof contains only the root node;
   * a tampered-child proof where one hash-referenced node is replaced so
     the parent/child reference mismatch must be detected;
   * a non-canonical RLP proof (single byte encoded as 0x8101) committed by
@@ -19,6 +22,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app import hp as hexprefix  # noqa: E402
 from app.keccak import keccak256  # noqa: E402
 from app.rlp import decode, encode  # noqa: E402
 from app.trie import MemoryTrie  # noqa: E402
@@ -59,6 +63,25 @@ def build_snapshot() -> dict:
             "proof": _proof_hex(trie, key),
             "expect": "AUTHORIZED" if enabled else "UNAUTHORIZED",
         })
+
+    # --- Standard short embedded node (instruction 0x12).  The root is a
+    # branch whose nibble-1 slot holds the *full RLP byte string* of the
+    # short leaf (RLP < 32 bytes), so the proof provides only the root. -
+    embedded_key = "0x12"
+    embedded_leaf_raw = encode(
+        [hexprefix.encode([2], True), b"\x01"])
+    if len(embedded_leaf_raw) >= 32:
+        raise RuntimeError("无法构造短内嵌夹具：叶节点 RLP 必须短于 32 字节")
+    embedded_branch = [b""] * 17
+    embedded_branch[1] = embedded_leaf_raw
+    embedded_root_raw = encode(embedded_branch)
+    embedded_case = {
+        "name": "short_embedded_leaf",
+        "command_id": embedded_key,
+        "root_hash": "0x" + keccak256(embedded_root_raw).hex(),
+        "proof": ["0x" + embedded_root_raw.hex()],
+        "expect": "AUTHORIZED",
+    }
 
     # --- Tampered child: parent stays valid, the hashed child is replaced
     # with a *different, still valid* committed node, so its hash mismatches
@@ -109,8 +132,9 @@ def build_snapshot() -> dict:
 
     return {
         "trie_root": "0x" + trie.root_hash.hex(),
-        "description": "离线指令授权快照（MPT 承诺：叶值 01 表示启用）",
-        "fixtures": fixtures + [tampered_case, noncanon_case, truncated_case],
+        "description": "离线指令授权快照（MPT 承诺：叶值 01 表示启用；支持标准短内嵌节点）",
+        "fixtures": fixtures + [embedded_case, tampered_case,
+                                noncanon_case, truncated_case],
     }
 
 

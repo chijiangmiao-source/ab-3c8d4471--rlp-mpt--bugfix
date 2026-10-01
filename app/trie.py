@@ -256,7 +256,7 @@ def _walk_from(node, target, pos, node_count, layer, base_trace, seen_hashes,
             _annotate_next(traces[-1], kind, ref)
             if kind == REF_HASH:
                 return None, False, pos, ref, REF_HASH, node_count, idx, traces
-            current, embedded = child, True
+            current, embedded = _decode_embedded(trace_layer, child), True
             continue
 
         encoded_path, child_or_value = current
@@ -299,15 +299,39 @@ def _walk_from(node, target, pos, node_count, layer, base_trace, seen_hashes,
         _annotate_next(traces[-1], kind, ref)
         if kind == REF_HASH:
             return None, False, pos, ref, REF_HASH, node_count, idx, traces
-        current, embedded = child_or_value, True
+        current, embedded = _decode_embedded(trace_layer, child_or_value), True
 
 
 def _classify_ref(layer: int, child) -> tuple[str, Optional[bytes]]:
     if isinstance(child, list):
         return REF_EMBEDDED, None
-    if isinstance(child, bytes) and len(child) == 32:
-        return REF_HASH, child
-    raise ProofError(trace_layer, "无效的子节点引用：既非内嵌节点也非32字节散列")
+    if isinstance(child, (bytes, bytearray)):
+        if len(child) == 32:
+            return REF_HASH, bytes(child)
+        # A non-empty string shorter than 32 bytes is the child node's
+        # own RLP, stored inline per the MPT spec.
+        if child:
+            return REF_EMBEDDED, None
+    raise ProofError(layer, "无效的子节点引用：既非内嵌节点也非32字节散列")
+
+
+def _decode_embedded(layer: int, child) -> list:
+    """Return an embedded child as a decoded node list.
+
+    A list is an already-decoded inline node; a short byte string is the
+    canonical RLP of the embedded node (the standard on-the-wire form).
+    """
+    if isinstance(child, list):
+        return child
+    try:
+        item, consumed = decode_raw(child)
+        if consumed != len(child):
+            raise RLPError("内嵌节点编码后存在多余字节")
+    except RLPError as exc:
+        raise ProofError(layer, f"内嵌节点RLP非规范或截断：{exc}") from exc
+    if not isinstance(item, list):
+        raise ProofError(layer, "无效的内嵌节点引用：短字节串必须是RLP编码的节点列表")
+    return item
 
 
 def _annotate_next(trace: LayerTrace, kind: str, ref: Optional[bytes]) -> None:
