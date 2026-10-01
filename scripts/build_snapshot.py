@@ -20,6 +20,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.keccak import keccak256  # noqa: E402
+from app.hp import encode as hp_encode  # noqa: E402
 from app.rlp import decode, encode  # noqa: E402
 from app.trie import MemoryTrie  # noqa: E402
 
@@ -98,6 +99,23 @@ def build_snapshot() -> dict:
         "expect": "INVALID",
     }
 
+    # --- Standard short inline node: the root branch references the leaf by
+    # the leaf's full RLP as a short byte string (<32 bytes) rather than a
+    # nested list, and the proof supplies only the root. Command 0x12, leaf
+    # value 0x01 -> AUTHORIZED, with two replayable layers (branch + leaf).
+    inline_leaf_raw = encode([hp_encode([2], True), b"\x01"])
+    assert len(inline_leaf_raw) < 32
+    inline_branch = [b""] * 17
+    inline_branch[1] = inline_leaf_raw
+    inline_root_raw = encode(inline_branch)
+    inline_case = {
+        "name": "short_inline_embedded_0x12",
+        "command_id": "0x12",
+        "root_hash": "0x" + keccak256(inline_root_raw).hex(),
+        "proof": ["0x" + inline_root_raw.hex()],
+        "expect": "AUTHORIZED",
+    }
+
     # --- Truncated proof (last hashed node removed). -----------------------
     truncated_case = {
         "name": "truncated_path",
@@ -110,7 +128,8 @@ def build_snapshot() -> dict:
     return {
         "trie_root": "0x" + trie.root_hash.hex(),
         "description": "离线指令授权快照（MPT 承诺：叶值 01 表示启用）",
-        "fixtures": fixtures + [tampered_case, noncanon_case, truncated_case],
+        "fixtures": fixtures + [tampered_case, noncanon_case,
+                                inline_case, truncated_case],
     }
 
 

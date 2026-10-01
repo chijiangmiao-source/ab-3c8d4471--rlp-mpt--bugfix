@@ -5,6 +5,7 @@ import os
 import unittest
 
 from app.keccak import keccak256
+from app.hp import encode as hp_encode
 from app.rlp import decode, encode
 from app.trie import (AUTHORIZED, INVALID, UNAUTHORIZED, EMPTY_ROOT,
                       MemoryTrie, verify_proof)
@@ -132,6 +133,146 @@ class ValidProofsAcrossFixture(unittest.TestCase):
         decoded = [decode(raw) for raw in proof]
         result = verify_proof(trie.root_hash, key, decoded)
         self.assertEqual(result.status, AUTHORIZED)
+
+
+class ShortInlineEmbeddedNode(unittest.TestCase):
+    """Canonical short-byte-string inline references (RLP < 32 bytes)."""
+
+    def _short_inline_proof(self, value=b"\x01"):
+        # Command id 0x12 -> nibbles [1,2]; the root branch consumes nibble 1
+        # and embeds, as a short byte string carrying the leaf's *full RLP*,
+        # the leaf covering remaining nibble [2]. Only the root is supplied.
+        leaf_raw = encode([hp_encode([2], True), value])
+        assert len(leaf_raw) < 32
+        branch = [b""] * 17
+        branch[1] = leaf_raw
+        root_raw = encode(branch)
+        return keccak256(root_raw), bytes.fromhex("12"), [root_raw], leaf_raw
+
+    def test_command_0x12_short_inline_leaf_authorized(self):
+        root, key, proof, leaf_raw = self._short_inline_proof()
+        result = verify_proof(root, key, proof)
+        self.assertEqual(result.status, AUTHORIZED)
+        self.assertTrue(result.authorized)
+        self.assertEqual(result.leaf_value_hex, "0x01")
+        self.assertIsNone(result.failure_reason)
+
+    def test_two_layer_replay_evidence(self):
+        root, key, proof, leaf_raw = self._short_inline_proof()
+        result = verify_proof(root, key, proof)
+        self.assertEqual(len(result.layers), 2)
+        root_layer, leaf_layer = result.layers
+        # Layer 0: the root branch committed by the 32-byte root hash.
+        self.assertEqual(root_layer.layer, 0)
+        self.assertEqual(root_layer.node_kind, "branch")
+        self.assertEqual(root_layer.ref_kind, "root")
+        self.assertEqual(root_layer.actual_hash, "0x" + root.hex())
+        self.assertEqual(root_layer.consumed_nibbles, "1")
+        self.assertEqual(root_layer.cumulative_path, "0x")
+        self.assertEqual(root_layer.next_ref_kind, "embedded")
+        self.assertEqual(root_layer.raw_rlp_hex, "0x" + proof[0].hex())
+        # Layer 1: the inline leaf carried by the parent as a short string.
+        self.assertEqual(leaf_layer.layer, 1)
+        self.assertEqual(leaf_layer.node_kind, "leaf")
+        self.assertEqual(leaf_layer.ref_kind, "embedded")
+        self.assertEqual(leaf_layer.actual_hash,
+                         "0x" + keccak256(leaf_raw).hex())
+        self.assertEqual(leaf_layer.raw_rlp_hex, "0x" + leaf_raw.hex())
+        self.assertEqual(leaf_layer.consumed_nibbles, "0x2")
+        self.assertEqual(leaf_layer.cumulative_path, "0x12")
+        self.assertIn("内嵌", leaf_layer.note)
+        self.assertIn("叶值 = 0x01", leaf_layer.note)
+
+    def test_nested_list_form_still_accepted(self):
+        # Same trie, but the embedded child is a nested RLP list (the form
+        # produced when tooling decodes proof nodes before verification).
+        leaf_raw = encode([hp_encode([2], True), b"\x01"])
+        branch = [b""] * 17
+        branch[1] = decode(leaf_raw)
+        root_raw = encode(branch)
+        result = verify_proof(keccak256(root_raw), bytes.fromhex("12"),
+                              [root_raw])
+        self.assertEqual(result.status, AUTHORIZED)
+        self.assertEqual(result.leaf_value_hex, "0x01")
+        self.assertEqual(len(result.layers), 2)
+
+    def test_32_byte_hash_reference_still_followed(self):
+        # Regression: a child whose RLP reaches 32 bytes is referenced by
+        # hash and the next standalone proof entry is consumed.
+        trie, _ = build_trie()
+        key = bytes.fromhex("1234")
+        result = verify_proof(trie.root_hash, key, trie.get_proof(key))
+        self.assertEqual(result.status, AUTHORIZED)
+        self.assertEqual(result.leaf_value_hex, "0x01")
+        self.assertTrue(
+            any(layer.ref_kind == "hash" for layer in result.layers))
+
+    def test_embedded_node_separately_provided_still_consumed(self):
+        # Compatibility case: an inline node shipped as its own proof entry
+        # is consumed (not reported as an unconsumed tail node).
+        root, key, proof, leaf_raw = self._short_inline_proof()
+        result = verify_proof(root, key, proof + [leaf_raw])
+        self.assertEqual(result.status, AUTHORIZED)
+        self.assertEqual(result.leaf_value_hex, "0x01")
+        leaf_layer = result.layers[1]
+        self.assertIn("证明中单独提供", leaf_layer.note)
+
+    def test_duplicate_embedded_node_rejected(self):
+        root, key, proof, leaf_raw = self._short_inline_proof()
+        result = verify_proof(root, key, proof + [leaf_raw, leaf_raw])
+        self.assertEqual(result.status, INVALID)
+        self.assertIn("尾节点", result.failure_reason)
+
+    def test_invalid_short_reference_rejected_as_invalid_not_crash(self):
+        # A <32-byte child string that is not a valid node list must be an
+        # INVALID verdict, never an uncaught exception (exit-code-1 crash).
+        branch = [b""] * 17
+        branch[1] = b"\x01"                    # bare byte, not an RLP list
+        root_raw = encode(branch)
+        result = verify_proof(keccak256(root_raw), bytes.fromhex("12"),
+                              [root_raw])
+        self.assertEqual(result.status, INVALID)
+        self.assertEqual(result.failure_layer, 0)
+        self.assertIn("内嵌", result.failure_reason)
+        self.assertIsNone(result.leaf_value_hex)
+        self.assertFalse(result.authorized)
+
+    def test_non_list_truncated_short_reference_rejected(self):
+        branch = [b""] * 17
+        branch[1] = bytes.fromhex("c380")      # truncated RLP list
+        root_raw = encode(branch)
+        result = verify_proof(keccak256(root_raw), bytes.fromhex("12"),
+                              [root_raw])
+        self.assertEqual(result.status, INVALID)
+        self.assertIn("内嵌", result.failure_reason)
+
+    def test_wrong_value_in_inline_leaf_is_unauthorized_not_invalid(self):
+        root, key, proof, _ = self._short_inline_proof(value=b"\x00")
+        result = verify_proof(root, key, proof)
+        self.assertEqual(result.status, UNAUTHORIZED)
+        self.assertFalse(result.authorized)
+        self.assertEqual(result.leaf_value_hex, "0x00")
+
+    def test_extension_inline_short_string(self):
+        # Extension node embedding its branch child via a short byte string.
+        leaf_a_raw = encode([hp_encode([0], True), b"\x01"])
+        leaf_b_raw = encode([hp_encode([0], True), b"\x00"])
+        inner_branch = [b""] * 17
+        inner_branch[3] = leaf_a_raw
+        inner_branch[4] = leaf_b_raw
+        inner_raw = encode(inner_branch)
+        assert len(inner_raw) < 32
+        ext = [hp_encode([1, 2], False), inner_raw]
+        root_raw = encode(ext)
+        # key 0x1230 nibbles [1,2,3,0]: extension [1,2], branch slot 3,
+        # leaf [0].
+        result = verify_proof(keccak256(root_raw), bytes.fromhex("1230"),
+                              [root_raw])
+        self.assertEqual(result.status, AUTHORIZED)
+        self.assertEqual(result.leaf_value_hex, "0x01")
+        self.assertEqual(
+            [l.node_kind for l in result.layers],
+            ["extension", "branch", "leaf"])
 
 
 class TamperedChildReference(unittest.TestCase):

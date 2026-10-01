@@ -200,6 +200,7 @@ def _walk_from(node, target, pos, node_count, layer, base_trace, seen_hashes,
     traces: list[LayerTrace] = []
     current = node
     embedded = False
+    inline_raw: Optional[bytes] = None
 
     def _embedded_note(raw_child: bytes) -> str:
         nonlocal idx
@@ -211,9 +212,12 @@ def _walk_from(node, target, pos, node_count, layer, base_trace, seen_hashes,
     while True:
         trace_layer = node_count
         node_count += 1
-        current_raw = base_trace.raw_rlp_hex if not embedded else \
-            "0x" + encode(current).hex()
-        embedded_hash = None if not embedded else keccak256(encode(current))
+        if embedded:
+            current_raw_hex = "0x" + inline_raw.hex()
+            embedded_hash = keccak256(inline_raw)
+        else:
+            current_raw_hex = base_trace.raw_rlp_hex
+            embedded_hash = None
         trace = LayerTrace(
             layer=trace_layer, node_kind="",
             ref_kind=base_trace.ref_kind if not embedded else REF_EMBEDDED,
@@ -221,8 +225,8 @@ def _walk_from(node, target, pos, node_count, layer, base_trace, seen_hashes,
             actual_hash=base_trace.actual_hash if not embedded else
             "0x" + embedded_hash.hex(),
             consumed_nibbles="", cumulative_path=_as_hex(target[:pos]),
-            raw_rlp_hex=current_raw,
-            note="" if not embedded else _embedded_note(encode(current)))
+            raw_rlp_hex=current_raw_hex,
+            note="" if not embedded else _embedded_note(inline_raw))
         if embedded:
             if embedded_hash in seen_hashes:
                 raise ProofError(trace_layer,
@@ -252,11 +256,11 @@ def _walk_from(node, target, pos, node_count, layer, base_trace, seen_hashes,
             trace.consumed_nibbles = f"{nib:x}"
             pos += 1
             traces.append(trace)
-            kind, ref = _classify_ref(trace_layer, child)
-            _annotate_next(traces[-1], kind, ref)
+            kind, embedded_node, inline = _classify_ref(trace_layer, child)
+            _annotate_next(traces[-1], kind, inline if kind == REF_HASH else None)
             if kind == REF_HASH:
-                return None, False, pos, ref, REF_HASH, node_count, idx, traces
-            current, embedded = child, True
+                return None, False, pos, inline, REF_HASH, node_count, idx, traces
+            current, inline_raw, embedded = embedded_node, inline, True
             continue
 
         encoded_path, child_or_value = current
@@ -295,19 +299,44 @@ def _walk_from(node, target, pos, node_count, layer, base_trace, seen_hashes,
         pos += len(path_nibbles)
         trace.cumulative_path = _as_hex(target[:pos])
         traces.append(trace)
-        kind, ref = _classify_ref(trace_layer, child_or_value)
-        _annotate_next(traces[-1], kind, ref)
+        kind, embedded_node, inline = _classify_ref(trace_layer, child_or_value)
+        _annotate_next(traces[-1], kind, inline if kind == REF_HASH else None)
         if kind == REF_HASH:
-            return None, False, pos, ref, REF_HASH, node_count, idx, traces
-        current, embedded = child_or_value, True
+            return None, False, pos, inline, REF_HASH, node_count, idx, traces
+        current, inline_raw, embedded = embedded_node, inline, True
 
 
-def _classify_ref(layer: int, child) -> tuple[str, Optional[bytes]]:
+def _classify_ref(layer: int, child) -> tuple[str, Optional[list], Optional[bytes]]:
+    """Classify a branch/extension child reference.
+
+    Returns ``(kind, embedded_node, ref_raw)``:
+
+      * ``REF_HASH``     -- a 32-byte hash reference; ``embedded_node`` is
+                            None and ``ref_raw`` is the hash bytes.
+      * ``REF_EMBEDDED`` -- a node inlined per the trie spec because its RLP
+                            is shorter than 32 bytes.  Two encodings are
+                            accepted: a nested RLP list (the decoded form some
+                            tooling emits) and the canonical short byte string
+                            carrying the child's *full RLP*.  For this form
+                            ``embedded_node`` is the decoded node list and
+                            ``ref_raw`` its canonical raw RLP.
+    """
     if isinstance(child, list):
-        return REF_EMBEDDED, None
+        return REF_EMBEDDED, child, encode(child)
     if isinstance(child, bytes) and len(child) == 32:
-        return REF_HASH, child
-    raise ProofError(trace_layer, "无效的子节点引用：既非内嵌节点也非32字节散列")
+        return REF_HASH, None, child
+    if isinstance(child, (bytes, bytearray)) and len(child) < 32:
+        raw = bytes(child)
+        try:
+            embedded_node, consumed = decode_raw(raw)
+            if consumed != len(raw):
+                raise RLPError("内嵌节点编码后存在多余字节")
+            if not isinstance(embedded_node, list):
+                raise RLPError("内嵌引用不是RLP节点列表")
+        except RLPError as exc:
+            raise ProofError(layer, f"无效的内嵌节点引用：{exc}") from exc
+        return REF_EMBEDDED, embedded_node, raw
+    raise ProofError(layer, "无效的子节点引用：既非内嵌节点也非32字节散列")
 
 
 def _annotate_next(trace: LayerTrace, kind: str, ref: Optional[bytes]) -> None:

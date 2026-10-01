@@ -111,6 +111,15 @@
       "expect": "INVALID"
     },
     {
+      "name": "short_inline_embedded_0x12",
+      "command_id": "0x12",
+      "root_hash": "0x7d2892cd2bf1dd0d049829aac77730d06a18831f15352c76bff2e13c833e965d",
+      "proof": [
+        "0xd48083c23201808080808080808080808080808080"
+      ],
+      "expect": "AUTHORIZED"
+    },
+    {
       "name": "truncated_path",
       "command_id": "0x5245434f4e5f4c41554e43485f30303031",
       "root_hash": "0x8335006febb76a8e1583781a86fa0bad964aefd397b6a2ec6b79a54bba0fc96c",

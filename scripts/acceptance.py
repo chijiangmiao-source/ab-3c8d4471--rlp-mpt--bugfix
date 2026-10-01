@@ -148,10 +148,13 @@ def main() -> int:
                   "tests.test_trie_proof.TraceContents",
                   "tests.test_trie_proof.ValidProofsAcrossFixture",
                   "tests.test_trie_proof.SnapshotFixtures"])
+    run_unittest("代码测试/标准短内嵌节点（短字节串内联，含两层证据与回归）",
+                 ["tests.test_trie_proof.ShortInlineEmbeddedNode"])
     run_unittest("页面构建检查/静态页面一致性", PAGE_CHECK)
     smoke_health_and_page()
     verify_via_api("enabled", "AUTHORIZED")
     verify_via_api("disabled", "UNAUTHORIZED")
+    verify_via_api("short_inline_embedded", "AUTHORIZED")
 
     # ---- 场景二：篡改子节点引用 ------------------------------------------
     banner("场景二：篡改子节点引用（父子引用不符）")

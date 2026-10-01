@@ -27,7 +27,7 @@ Trie 证明）。系统逐层核验父子引用并回放半字节路径：
 | `scripts/build_snapshot.py` | 生成确定性离线快照 `data/snapshot.json` |
 | `scripts/acceptance.py` | 验收运行器（三场景穿插，退出码报告） |
 | `webstatic/` | 复核页面（`index.html` / `styles.css` / `app.js`） |
-| `tests/` | 60 项单元/页面/HTTP 测试 |
+| `tests/` | 70 项单元/页面/HTTP 测试 |
 
 Keccak-256 与 trie 根/证明均已用标准向量和权威 `pycryptodome`、`py-trie`
 做过随机交叉验证。
@@ -77,6 +77,7 @@ docker compose run --rm verify                 # 一次性验收，按退出码�
 
 ## 快照场景
 
-`data/snapshot.json` 内置 11 个夹具：8 个有效指令（启用/未授权）、
-篡改子节点引用、非规范 RLP（`0x8101`）与路径残缺（缺失尾节点），
-页面“快照夹具回放”表格中可逐一回放。
+`data/snapshot.json` 内置 12 个夹具：8 个有效指令（启用/未授权）、
+篡改子节点引用、非规范 RLP（`0x8101`）、标准短内嵌节点（根分支以子节点
+完整 RLP 的短字节串内联叶节点，指令 `0x12`，仅提供根节点）与路径残缺
+（缺失尾节点），页面“快照夹具回放”表格中可逐一回放。
