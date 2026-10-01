@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>离线指令授权快照复核</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>离线指令授权快照复核台</h1>
+    <p class="subtitle">
+      地面审查员提交 32 字节根哈希、十六进制指令标识与按根到叶排序的 RLP 节点；
+      系统逐层核验 Merkle Patricia Trie 承诺，叶值为 <code>01</code> 方为“已授权”。
+    </p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>一、快照夹具回放</h2>
+      <p class="hint">
+        以下夹具随离线快照一同生成，覆盖有效授权、未授权、篡改子节点引用、
+        非规范 RLP 与路径残缺场景。点击“回放”逐层复现核验过程。
+      </p>
+      <table id="fixture-table">
+        <thead>
+          <tr><th>场景</th><th>指令标识（十六进制）</th><th>预期</th><th>操作</th></tr>
+        </thead>
+        <tbody id="fixture-body">
+          <tr><td colspan="4" class="muted">正在加载快照…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>二、手动导入授权快照</h2>
+      <div class="form-row">
+        <label for="in-root">32 字节根哈希</label>
+        <input id="in-root" type="text" spellcheck="false"
+               placeholder="0x…（64 个十六进制字符）" />
+      </div>
+      <div class="form-row">
+        <label for="in-key">十六进制指令标识</label>
+        <input id="in-key" type="text" spellcheck="false" placeholder="0x…" />
+      </div>
+      <div class="form-row">
+        <label for="in-proof">RLP 节点（根到叶，每行一个 0x 十六进制串）</label>
+        <textarea id="in-proof" rows="5" spellcheck="false"
+                  placeholder="0xf8…&#10;0xe5…"></textarea>
+      </div>
+      <button id="btn-verify" type="button">提交核验</button>
+    </section>
+
+    <section class="panel" id="result-panel" hidden>
+      <h2>三、核验结果</h2>
+      <div id="verdict" class="verdict"></div>
+      <div id="meta" class="meta"></div>
+      <div id="failure-box" class="failure" hidden></div>
+
+      <h3>逐层路径证据</h3>
+      <table id="layer-table">
+        <thead>
+          <tr>
+            <th>层</th>
+            <th>节点类型</th>
+            <th>引用方式</th>
+            <th>节点摘要（Keccak-256）</th>
+            <th>本层消费半字节</th>
+            <th>已消费路径</th>
+            <th>下一跳引用</th>
+            <th>原始 RLP</th>
+          </tr>
+        </thead>
+        <tbody id="layer-body"></tbody>
+      </table>
+      <p id="leaf-line" class="leaf-line"></p>
+    </section>
+  </main>
+
+  <footer>
+    <span>离线复核 · 无外部网络依赖 · <a href="/healthz">健康检查</a></span>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
